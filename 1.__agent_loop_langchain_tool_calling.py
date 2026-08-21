@@ -7,7 +7,7 @@ from typing import Literal
 
 
 MAX_ITERATIONS = 10
-MODEL = "qwen3.5:0.8b"
+MODEL = "gpt-5-nano"
 
 load_dotenv()
 
@@ -55,7 +55,7 @@ def run_agent(question:str):
     print(get_product_price.args_schema.model_json_schema())
     tools_dict = {t.name:t for t in tools}
     
-    llm = init_chat_model(f"ollama:{MODEL}",temperature = 0.5)
+    llm = init_chat_model(f"openai:{MODEL}",temperature = 0.5)
     llm_with_tools = llm.bind_tools(tools)
     
     messages = [
