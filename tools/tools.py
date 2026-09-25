@@ -20,10 +20,11 @@ tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 @tool(response_format="content_and_artifact")
 def web_search(query: str) -> tuple[str, list[dict]]:
-    """Find up to five source candidates with titles, complete URLs and snippets."""
+    """Find one source candidate with its title, complete URL and snippet."""
     results = tavily.search(query=query, max_results=1)
     candidates = [
-        {"title": r.get("title", ""), "url": r["url"], "snippet": r.get("content", "")}
+        {"title": r.get("title", ""), "url": r["url"],
+         "snippet": r.get("content", "")}
         for r in results.get("results", []) if r.get("url")
     ]
     return json.dumps(candidates, ensure_ascii=False), candidates
@@ -137,4 +138,3 @@ def _extract_url(url: str) -> dict:
 
     except Exception as e:
         return failure(f"Could not scrape URL: {str(e)}")
-

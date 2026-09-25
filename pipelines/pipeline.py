@@ -10,6 +10,21 @@ def tool_artifacts(result: dict, tool_name: str) -> list:
             and message.artifact is not None]
 
 
+def selected_reader_evidence(reader_result: dict, candidates: list[dict]) -> dict:
+    """Resolve the reader's selection to original, successful tool evidence."""
+    selection = reader_result.get("structured_response")
+    if selection is None or selection.selected_url is None:
+        raise RuntimeError("Reader did not select a suitable extracted source.")
+    if selection.selected_url not in {candidate["url"] for candidate in candidates}:
+        raise RuntimeError("Reader selected a URL outside the search candidates.")
+    for result in reversed(tool_artifacts(reader_result, "scrape_url")):
+        if (result.get("url") == selection.selected_url
+                and result.get("status") == "ok"
+                and result.get("content", "").strip()):
+            return result
+    raise RuntimeError("Selected URL has no successful, non-empty extraction.")
+
+
 def run_research_pipeline(topic : str) -> dict:
 
     state={}
@@ -35,7 +50,6 @@ def run_research_pipeline(topic : str) -> dict:
 
 
 
-   # Temporarily disabled for debugging: run only the search stage.
     #step 2 - reader agent
     print("\n"+"="*50)
     print("step 2 - Reader agent is scraping top resources ...")
@@ -55,6 +69,8 @@ def run_research_pipeline(topic : str) -> dict:
     if not state["scrape_results"]:
         raise RuntimeError("Reader did not extract a source within its call budget.")
     state["scraped_content"] = json.dumps(state["scrape_results"], ensure_ascii=False)
+    state["selected_source"] = selected_reader_evidence(reader_result, state["search_candidates"])
+    state["selection_reason"] = reader_result["structured_response"].reason
 
 
     print("\nscraped content: \n", state['scraped_content'])
@@ -66,9 +82,10 @@ def run_research_pipeline(topic : str) -> dict:
     print("step 3 - Writer is drafting the report ...")
     print("="*50)
 
+    # Keep all attempts in state for debugging; send only selected evidence to the writer.
     research_combined = (
-        f"SEARCH SNIPPETS (not full articles) : \n {state['search_results']} \n\n"
-        f"EXTRACTION RESULTS (use successful content; report errors as limitations) : \n {state['scraped_content']}"
+        "SELECTED SOURCE EVIDENCE (one source only; note any truncation):\n"
+        + json.dumps(state["selected_source"], ensure_ascii=False)
     )
 
     state["report"] = writer_chain.invoke({
@@ -77,7 +94,6 @@ def run_research_pipeline(topic : str) -> dict:
     })
 
     print("\n Final Report\n",state['report'])
-
 
     #critic report
 
