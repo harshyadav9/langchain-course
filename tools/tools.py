@@ -1,6 +1,7 @@
 from langchain.tools import tool
 from dotenv import load_dotenv
 import os
+import json
 import requests
 from tavily import TavilyClient
 from rich import print
@@ -17,27 +18,31 @@ tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 
 
-@tool
-def web_search(query : str) -> str:
-    """Search the web for recent and reliable information on a topic . Returns Titles , URLs and snippets."""
-    results = tavily.search(query=query,max_results=5)
+@tool(response_format="content_and_artifact")
+def web_search(query: str) -> tuple[str, list[dict]]:
+    """Find up to five source candidates with titles, complete URLs and snippets."""
+    results = tavily.search(query=query, max_results=1)
+    candidates = [
+        {"title": r.get("title", ""), "url": r["url"], "snippet": r.get("content", "")}
+        for r in results.get("results", []) if r.get("url")
+    ]
+    return json.dumps(candidates, ensure_ascii=False), candidates
 
-    formatted = "\n----\n".join(
-        f"Title: {r['title']}\nURL: {r['url']}\nContent: {r['content'][:500]}"
-        for r in results["results"]
-    )
 
-    print(formatted)
-    
-    
-    
-    
-@tool
-def scrape_url(url: str) -> str:
-    """
-    Scrape and extract clean readable content from a URL.
-    Uses multiple extraction strategies for better reliability.
-    """
+@tool(response_format="content_and_artifact")
+def scrape_url(url: str) -> tuple[str, dict]:
+    """Extract readable content from a candidate URL; report extraction failures explicitly."""
+    result = _extract_url(url)
+    return json.dumps(result, ensure_ascii=False), result
+
+
+def _extract_url(url: str) -> dict:
+    def success(content: str) -> dict:
+        return {"url": url, "status": "ok", "content": content[:5000],
+                "truncated": len(content) > 5000}
+
+    def failure(error: str) -> dict:
+        return {"url": url, "status": "error", "content": "", "error": error}
 
     headers = {
         "User-Agent": (
@@ -72,7 +77,7 @@ def scrape_url(url: str) -> str:
 
         if extracted and len(extracted.strip()) > 200:
             cleaned = re.sub(r'\s+', ' ', extracted)
-            return cleaned[:5000]
+            return success(cleaned)
 
         # ──────────────────────────────────────────────────
         # Strategy 2 → readability
@@ -97,7 +102,7 @@ def scrape_url(url: str) -> str:
 
         if text and len(text.strip()) > 200:
             cleaned = re.sub(r'\s+', ' ', text)
-            return cleaned[:5000]
+            return success(cleaned)
 
         # ──────────────────────────────────────────────────
         # Strategy 3 → fallback full page extraction
@@ -119,17 +124,17 @@ def scrape_url(url: str) -> str:
 
         cleaned = re.sub(r'\s+', ' ', text)
 
-        if cleaned:
-            return cleaned[:5000]
+        if len(cleaned.strip()) > 200:
+            return success(cleaned)
 
-        return "Could not extract meaningful content from the page."
+        return failure("Could not extract meaningful content from the page.")
 
     except requests.exceptions.Timeout:
-        return "Request timed out while scraping the URL."
+        return failure("Request timed out while scraping the URL.")
 
     except requests.exceptions.HTTPError as e:
-        return f"HTTP error occurred: {str(e)}"
+        return failure(f"HTTP error occurred: {str(e)}")
 
     except Exception as e:
-        return f"Could not scrape URL: {str(e)}"
+        return failure(f"Could not scrape URL: {str(e)}")
 
